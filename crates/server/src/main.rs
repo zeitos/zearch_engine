@@ -207,6 +207,17 @@ async fn delete_doc(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
 }
 
+async fn flush_all(
+    State(state): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    state
+        .router
+        .flush()
+        .await
+        .map(|_| Json(json!({ "ok": true })))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
+}
+
 async fn admin_ui() -> axum::response::Html<&'static str> {
     axum::response::Html(include_str!("admin.html"))
 }
@@ -243,6 +254,7 @@ fn build_http_app(router: Arc<search_router::Router>, metrics: PrometheusHandle)
         .route("/v1/meli/bulk", post(meli_bulk))
         .route("/v1/index/{id}", delete(delete_doc))
         .route("/v1/stats", get(stats))
+        .route("/v1/admin/flush", post(flush_all))
         .route("/metrics", get(prometheus_metrics))
         .with_state(state)
 }
