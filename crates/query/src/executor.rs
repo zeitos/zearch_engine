@@ -114,24 +114,22 @@ impl QueryExecutor {
         let mut per_token_sets: Vec<std::collections::HashSet<u32>> = Vec::new();
         for token in &query_tokens {
             let mut token_docs: std::collections::HashSet<u32> = std::collections::HashSet::new();
-            let posting_lists = if token.text.len() <= 4 {
-                // Short terms: prefix search so "bici" matches "bicicleta"
-                let mut results = reader.prefix_search_term(&token.text);
-                if results.is_empty() {
-                    results = reader
+            // Always try prefix search first — this handles Spanish plurals naturally
+            // (e.g. "computadora" is a prefix of "computadoras") and short-term expansion.
+            // Fall back to fuzzy (typo tolerance) or exact if prefix yields nothing.
+            let posting_lists = {
+                let prefix = reader.prefix_search_term(&token.text);
+                if !prefix.is_empty() {
+                    prefix
+                } else if request.typo_tolerance && token.text.len() > 4 {
+                    let max_dist = if token.text.len() <= 6 { 1 } else { 2 };
+                    reader.fuzzy_search_term(&token.text, max_dist)
+                } else {
+                    reader
                         .search_term(&token.text)
                         .map(|pl| vec![(token.text.clone(), pl)])
-                        .unwrap_or_default();
+                        .unwrap_or_default()
                 }
-                results
-            } else if request.typo_tolerance {
-                let max_dist = if token.text.len() <= 6 { 1 } else { 2 };
-                reader.fuzzy_search_term(&token.text, max_dist)
-            } else {
-                reader
-                    .search_term(&token.text)
-                    .map(|pl| vec![(token.text.clone(), pl)])
-                    .unwrap_or_default()
             };
             for (_, pl) in posting_lists {
                 for posting in &pl.postings {
@@ -175,8 +173,12 @@ impl QueryExecutor {
                 let avgdl = stats.field_avg_lengths.get(&field.name).copied().unwrap_or(1.0);
 
                 for token in &query_tokens {
-                    // Count how many times this query token appears in this field
-                    let tf = doc_tokens.iter().filter(|t| t.text == token.text).count() as u32;
+                    // Count exact matches plus prefix-extended forms (plurals, inflections).
+                    // "computadora" matches both "computadora" and "computadoras".
+                    let tf = doc_tokens
+                        .iter()
+                        .filter(|t| t.text == token.text || t.text.starts_with(token.text.as_str()))
+                        .count() as u32;
                     if tf == 0 {
                         // Also check fuzzy matches if typo tolerance is on
                         if request.typo_tolerance && token.text.len() >= 3 {
