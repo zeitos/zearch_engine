@@ -3,8 +3,8 @@ use search_core::{Document, FilterValue, SearchRequest, SortOrder, SortSpec, Val
 use search_proto::shard::shard_service_server::ShardService;
 use search_proto::shard::{
     filter_value, AggregationBucket, AggregationResult, BulkIndexRequest, BulkIndexResponse,
-    DeleteRequest, DeleteResponse, DocumentProto, GetDocsRequest, GetDocsResponse, HealthRequest,
-    HealthResponse, IndexRequest, IndexResponse, ScoredDocument,
+    DeleteRequest, DeleteResponse, DocumentProto, FlushRequest, FlushResponse, GetDocsRequest,
+    GetDocsResponse, HealthRequest, HealthResponse, IndexRequest, IndexResponse, ScoredDocument,
     SearchRequest as ProtoSearchRequest, SearchResponse as ProtoSearchResponse,
     SortOrder as ProtoSortOrder, StatsRequest, StatsResponse,
 };
@@ -199,6 +199,18 @@ impl ShardService for ShardGrpcServer {
         Ok(Response::new(HealthResponse {
             healthy: true,
             status: "ok".into(),
+        }))
+    }
+
+    async fn flush(
+        &self,
+        _request: Request<FlushRequest>,
+    ) -> Result<Response<FlushResponse>, Status> {
+        let before = self.shard.stats().segment_count;
+        self.shard.flush().map_err(|e| Status::internal(e.to_string()))?;
+        let after = self.shard.stats().segment_count;
+        Ok(Response::new(FlushResponse {
+            segments_created: after.saturating_sub(before),
         }))
     }
 }

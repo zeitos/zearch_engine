@@ -10,6 +10,7 @@ service ShardService {
     rpc Delete (DeleteRequest) returns (DeleteResponse);
     rpc Stats (StatsRequest) returns (StatsResponse);
     rpc Health (HealthRequest) returns (HealthResponse);
+    rpc Flush (FlushRequest) returns (FlushResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -149,4 +150,10 @@ message HealthRequest {}
 message HealthResponse {
     bool healthy = 1;
     string status = 2;
+}
+
+message FlushRequest {}
+
+message FlushResponse {
+    uint32 segments_created = 1;
 }

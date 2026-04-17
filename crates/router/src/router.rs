@@ -205,6 +205,18 @@ impl Router {
         self.shards[shard_idx].delete(doc_id).await
     }
 
+    /// Flush all shards in parallel.
+    pub async fn flush(&self) -> search_core::Result<()> {
+        let tasks: Vec<_> = self.shards.iter().map(|s| {
+            let s = s.clone();
+            tokio::spawn(async move { s.flush().await })
+        }).collect();
+        for t in tasks {
+            t.await.map_err(|e| search_core::Error::Internal(e.to_string()))??;
+        }
+        Ok(())
+    }
+
     pub async fn stats(&self) -> RouterStats {
         let mut shards = Vec::new();
         for shard in &self.shards {

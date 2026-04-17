@@ -19,6 +19,7 @@ pub trait ShardClient: Send + Sync {
     async fn delete(&self, doc_id: u64) -> search_core::Result<()>;
     async fn get_docs(&self, doc_ids: &[u64]) -> search_core::Result<Vec<Document>>;
     async fn stats(&self) -> search_core::Result<search_shard::ShardStats>;
+    async fn flush(&self) -> search_core::Result<()>;
     async fn health(&self) -> bool;
 }
 
@@ -73,6 +74,10 @@ impl ShardClient for LocalShardClient {
         Ok(self.shard.stats())
     }
 
+    async fn flush(&self) -> search_core::Result<()> {
+        self.shard.flush()
+    }
+
     async fn health(&self) -> bool {
         true
     }
@@ -85,9 +90,9 @@ impl ShardClient for LocalShardClient {
 use search_proto::shard::shard_service_client::ShardServiceClient;
 use search_proto::shard::{
     filter_value, AggregationResult, BulkIndexRequest, DeleteRequest, DocumentProto,
-    FilterValue as ProtoFilterValue, GetDocsRequest, HealthRequest, IndexRequest, MultiValueFilter,
-    RangeFilter, SearchRequest as ProtoSearchRequest, SortOrder as ProtoSortOrder,
-    SortSpec as ProtoSortSpec, StatsRequest,
+    FilterValue as ProtoFilterValue, FlushRequest, GetDocsRequest, HealthRequest, IndexRequest,
+    MultiValueFilter, RangeFilter, SearchRequest as ProtoSearchRequest,
+    SortOrder as ProtoSortOrder, SortSpec as ProtoSortSpec, StatsRequest,
 };
 use search_core::{FilterValue, SortOrder, Value};
 use tonic::transport::Channel;
@@ -258,6 +263,15 @@ impl ShardClient for RemoteShardClient {
             buffer_size_bytes: 0,
             shard_id: resp.shard_id,
         })
+    }
+
+    async fn flush(&self) -> search_core::Result<()> {
+        let mut client = self.connect().await?;
+        client
+            .flush(tonic::Request::new(FlushRequest {}))
+            .await
+            .map_err(|e| search_core::Error::Grpc(e.to_string()))?;
+        Ok(())
     }
 
     async fn health(&self) -> bool {
