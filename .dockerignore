@@ -1,0 +1,7 @@
+target/
+.git/
+.claude/
+spec/
+tests/
+k8s/
+*.md

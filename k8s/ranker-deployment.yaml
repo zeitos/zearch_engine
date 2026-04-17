@@ -1,0 +1,61 @@
+# Optional: external gRPC re-ranker service (task 7.11).
+# Deploy this if using type: grpc in ranker config.
+# Replace the image with your actual ranker implementation.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ranker
+  namespace: search
+  labels:
+    app: ranker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ranker
+  template:
+    metadata:
+      labels:
+        app: ranker
+    spec:
+      containers:
+        - name: ranker
+          image: search-ranker:latest   # replace with actual ranker image
+          ports:
+            - name: grpc
+              containerPort: 50051
+              protocol: TCP
+          readinessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ranker
+  namespace: search
+  labels:
+    app: ranker
+spec:
+  type: ClusterIP
+  selector:
+    app: ranker
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+      protocol: TCP

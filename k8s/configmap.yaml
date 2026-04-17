@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: search-engine-config
+  namespace: search
+data:
+  # Router config — shard endpoints use StatefulSet DNS names.
+  # Replace NUM_SHARDS with actual replica count if changed.
+  router-config.yaml: |
+    mode: router
+    router:
+      http_port: 8080
+      query_timeout_ms: 5000
+      shard_discovery: static
+      shard_endpoints:
+        - "http://shard-0.shard-headless.search.svc.cluster.local:9001"
+        - "http://shard-1.shard-headless.search.svc.cluster.local:9001"
+        - "http://shard-2.shard-headless.search.svc.cluster.local:9001"
+        - "http://shard-3.shard-headless.search.svc.cluster.local:9001"
+    ranker:
+      type: none
+      timeout_ms: 30
+      candidates: 200
+
+  # Shard config — shard_id is auto-detected from HOSTNAME at runtime.
+  shard-config.yaml: |
+    mode: shard
+    shard:
+      grpc_port: 9001
+      data_dir: /data
+      num_shards: 4
+      write_buffer_size: 67108864  # 64 MB
+      merge_threads: 2

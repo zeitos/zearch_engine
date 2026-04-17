@@ -1,0 +1,143 @@
+syntax = "proto3";
+
+package shard;
+
+service ShardService {
+    rpc Search (SearchRequest) returns (SearchResponse);
+    rpc GetDocs (GetDocsRequest) returns (GetDocsResponse);
+    rpc Index (IndexRequest) returns (IndexResponse);
+    rpc Delete (DeleteRequest) returns (DeleteResponse);
+    rpc Stats (StatsRequest) returns (StatsResponse);
+    rpc Health (HealthRequest) returns (HealthResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+message SearchRequest {
+    string query = 1;
+    map<string, FilterValue> filters = 2;
+    repeated string aggregations = 3;
+    optional SortSpec sort = 4;
+    uint64 offset = 5;
+    uint64 limit = 6;
+    bool typo_tolerance = 7;
+    optional string language = 8;
+}
+
+message FilterValue {
+    oneof filter {
+        string eq = 1;
+        RangeFilter range = 2;
+        MultiValueFilter multi = 3;
+    }
+}
+
+message RangeFilter {
+    optional double gte = 1;
+    optional double lte = 2;
+}
+
+message MultiValueFilter {
+    repeated string values = 1;
+}
+
+message SortSpec {
+    string field = 1;
+    SortOrder order = 2;
+}
+
+enum SortOrder {
+    DESC = 0;
+    ASC = 1;
+}
+
+message SearchResponse {
+    repeated ScoredDocument hits = 1;
+    uint64 total_hits = 2;
+    map<string, AggregationResult> aggregations = 3;
+}
+
+message ScoredDocument {
+    uint64 doc_id = 1;
+    float score = 2;
+}
+
+message AggregationResult {
+    repeated AggregationBucket buckets = 1;
+}
+
+message AggregationBucket {
+    string value = 1;
+    uint64 count = 2;
+}
+
+// ---------------------------------------------------------------------------
+// GetDocs
+// ---------------------------------------------------------------------------
+
+message GetDocsRequest {
+    repeated uint64 doc_ids = 1;
+}
+
+message GetDocsResponse {
+    repeated DocumentProto documents = 1;
+}
+
+message DocumentProto {
+    uint64 id = 1;
+    string title = 2;
+    string description = 3;
+    double price = 4;
+    string category = 5;
+    map<string, string> attributes = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Index
+// ---------------------------------------------------------------------------
+
+message IndexRequest {
+    DocumentProto document = 1;
+}
+
+message IndexResponse {
+    bool success = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+message DeleteRequest {
+    uint64 doc_id = 1;
+}
+
+message DeleteResponse {
+    bool success = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Stats
+// ---------------------------------------------------------------------------
+
+message StatsRequest {}
+
+message StatsResponse {
+    uint64 doc_count = 1;
+    uint32 segment_count = 2;
+    uint64 index_size_bytes = 3;
+    uint32 shard_id = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+message HealthRequest {}
+
+message HealthResponse {
+    bool healthy = 1;
+    string status = 2;
+}

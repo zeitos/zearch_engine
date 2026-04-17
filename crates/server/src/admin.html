@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Search Engine Admin</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 24px; }
+  h1 { font-size: 1.4rem; font-weight: 600; color: #f8fafc; margin-bottom: 4px; }
+  .subtitle { font-size: 0.85rem; color: #64748b; margin-bottom: 24px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .card { background: #1e2130; border: 1px solid #2d3148; border-radius: 10px; padding: 20px; }
+  .card-title { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 12px; }
+  .big-number { font-size: 2.4rem; font-weight: 700; color: #f8fafc; line-height: 1; }
+  .big-unit { font-size: 1rem; color: #64748b; font-weight: 400; margin-left: 6px; }
+  .section-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; margin-bottom: 10px; }
+  .shard-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .shard-card { background: #1e2130; border: 1px solid #2d3148; border-left: 3px solid #22c55e; border-radius: 10px; padding: 16px; }
+  .shard-card.warning { border-left-color: #f59e0b; }
+  .shard-card-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b; margin-bottom: 6px; }
+  .shard-card-name { font-size: 1rem; font-weight: 600; color: #f8fafc; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .metric { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .metric-label { font-size: 0.8rem; color: #94a3b8; }
+  .metric-value { font-size: 0.8rem; font-weight: 600; color: #e2e8f0; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.7rem; font-weight: 600; }
+  .badge-green { background: #14532d; color: #4ade80; }
+  .badge-yellow { background: #451a03; color: #fbbf24; }
+  .progress { background: #2d3148; border-radius: 4px; height: 4px; margin-top: 10px; overflow: hidden; }
+  .progress-bar { height: 100%; background: #6366f1; border-radius: 4px; transition: width 0.4s ease; }
+  .search-section { background: #1e2130; border: 1px solid #2d3148; border-radius: 10px; padding: 20px; margin-bottom: 24px; }
+  .search-section h2 { font-size: 0.9rem; font-weight: 600; color: #f8fafc; margin-bottom: 14px; }
+  .search-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  input[type=text], input[type=number], select { background: #0f1117; border: 1px solid #2d3148; border-radius: 6px; color: #e2e8f0; padding: 8px 12px; font-size: 0.875rem; outline: none; }
+  input[type=text] { flex: 1; min-width: 200px; }
+  input[type=text]:focus, select:focus { border-color: #6366f1; }
+  button { background: #6366f1; color: #fff; border: none; border-radius: 6px; padding: 8px 18px; font-size: 0.875rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+  button:hover { background: #4f46e5; }
+  button.secondary { background: #2d3148; }
+  button.secondary:hover { background: #374151; }
+  .results-wrap { display: grid; grid-template-columns: 1fr 200px; gap: 12px; margin-top: 14px; }
+  @media (max-width: 600px) { .results-wrap { grid-template-columns: 1fr; } }
+  .result-item { background: #0f1117; border: 1px solid #2d3148; border-radius: 8px; padding: 12px 14px; margin-bottom: 8px; }
+  .result-title { font-size: 0.9rem; font-weight: 600; color: #f8fafc; margin-bottom: 4px; }
+  .result-meta { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tag { font-size: 0.75rem; color: #64748b; }
+  .tag-price { color: #4ade80; font-weight: 600; }
+  .tag-score { color: #a78bfa; }
+  .facets-card { background: #0f1117; border: 1px solid #2d3148; border-radius: 8px; padding: 14px; align-self: start; }
+  .facets-title { font-size: 0.75rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .facet-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid #1e2130; }
+  .facet-row:last-child { border-bottom: none; }
+  .facet-val { font-size: 0.8rem; color: #e2e8f0; text-transform: capitalize; }
+  .facet-cnt { font-size: 0.72rem; background: #2d3148; color: #94a3b8; padding: 1px 7px; border-radius: 99px; }
+  .status-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; font-size: 0.8rem; color: #64748b; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .ml-auto { margin-left: auto; }
+  .hits-meta { font-size: 0.8rem; color: #64748b; margin: 12px 0 4px; }
+  .empty { color: #64748b; font-size: 0.85rem; padding: 20px 0; text-align: center; }
+  .err { color: #f87171; font-size: 0.82rem; padding: 10px 14px; background: #2d1515; border-radius: 6px; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<h1>Search Engine Admin</h1>
+<p class="subtitle">Panel de administración — estado en tiempo real</p>
+
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <span id="status-text">Conectando...</span>
+  <span id="last-updated"></span>
+  <button class="secondary ml-auto" onclick="refresh()">↺ Actualizar</button>
+</div>
+
+<div class="grid">
+  <div class="card"><div class="card-title">Total documentos</div><div class="big-number" id="total-docs">—</div></div>
+  <div class="card"><div class="card-title">Total segmentos</div><div class="big-number" id="total-segs">—</div></div>
+  <div class="card"><div class="card-title">Shards activos</div><div class="big-number" id="shard-count">—</div></div>
+</div>
+
+<div class="section-label">Estado por shard</div>
+<div class="shard-grid" id="shard-grid"></div>
+
+<div class="search-section">
+  <h2>Búsqueda de prueba</h2>
+  <div class="search-row">
+    <input type="text" id="q" placeholder="Buscar productos..." onkeydown="if(event.key==='Enter') doSearch()" />
+    <input type="number" id="limit" value="10" min="1" max="100" style="width:70px" />
+    <select id="cat-filter">
+      <option value="">Todas las categorías</option>
+      <option value="electronica">Electrónica</option>
+      <option value="hogar">Hogar</option>
+      <option value="ropa">Ropa</option>
+      <option value="deportes">Deportes</option>
+      <option value="libros">Libros</option>
+    </select>
+    <button onclick="doSearch()">Buscar</button>
+  </div>
+  <div id="results"></div>
+</div>
+
+<script>
+function fmt(n) { return Number(n).toLocaleString('es-AR'); }
+
+function el(tag, cls) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  return e;
+}
+
+function txt(tag, cls, content) {
+  const e = el(tag, cls);
+  e.textContent = content;
+  return e;
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/v1/stats');
+    const data = await r.json();
+
+    const totalDocs = document.getElementById('total-docs');
+    totalDocs.textContent = '';
+    totalDocs.appendChild(document.createTextNode(fmt(data.total_docs)));
+    const u1 = el('span', 'big-unit'); u1.textContent = 'docs'; totalDocs.appendChild(u1);
+
+    const totalSegs = document.getElementById('total-segs');
+    totalSegs.textContent = '';
+    totalSegs.appendChild(document.createTextNode(fmt(data.total_segments)));
+    const u2 = el('span', 'big-unit'); u2.textContent = 'segs'; totalSegs.appendChild(u2);
+
+    const shards = Array.isArray(data.shards) ? data.shards : [];
+    const shardCount = document.getElementById('shard-count');
+    shardCount.textContent = '';
+    shardCount.appendChild(document.createTextNode(shards.length));
+    const u3 = el('span', 'big-unit'); u3.textContent = 'shards'; shardCount.appendChild(u3);
+
+    const maxDocs = Math.max(...shards.map(s => s.doc_count), 1);
+    const grid = document.getElementById('shard-grid');
+    grid.textContent = '';
+    shards.forEach(s => {
+      const pct = Math.round(s.doc_count / maxDocs * 100);
+      const hasBuffer = s.buffer_doc_count > 0;
+
+      const card = el('div', 'shard-card' + (hasBuffer ? ' warning' : ''));
+
+      card.appendChild(txt('div', 'shard-card-label', 'Shard'));
+
+      const nameRow = el('div', 'shard-card-name');
+      nameRow.appendChild(document.createTextNode('#' + s.shard_id + ' '));
+      const badge = el('span', hasBuffer ? 'badge badge-yellow' : 'badge badge-green');
+      badge.textContent = hasBuffer ? 'buffer activo' : 'ok';
+      nameRow.appendChild(badge);
+      card.appendChild(nameRow);
+
+      [['Documentos', fmt(s.doc_count)], ['Segmentos', s.segment_count], ['En buffer', fmt(s.buffer_doc_count)]].forEach(([label, value]) => {
+        const row = el('div', 'metric');
+        row.appendChild(txt('span', 'metric-label', label));
+        row.appendChild(txt('span', 'metric-value', value));
+        card.appendChild(row);
+      });
+
+      const prog = el('div', 'progress');
+      const bar = el('div', 'progress-bar');
+      bar.style.width = pct + '%';
+      prog.appendChild(bar);
+      card.appendChild(prog);
+
+      grid.appendChild(card);
+    });
+
+    document.getElementById('dot').style.background = '#22c55e';
+    document.getElementById('status-text').textContent = 'Conectado';
+    document.getElementById('last-updated').textContent = '· ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    document.getElementById('dot').style.background = '#f87171';
+    document.getElementById('status-text').textContent = 'Error de conexión';
+  }
+}
+
+async function doSearch() {
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  const limit = parseInt(document.getElementById('limit').value) || 10;
+  const cat = document.getElementById('cat-filter').value;
+  const body = { query: q, limit, aggregations: ['category'] };
+  if (cat) body.filters = { category: cat };
+
+  const container = document.getElementById('results');
+  container.textContent = '';
+  const loading = txt('div', 'empty', 'Buscando...');
+  container.appendChild(loading);
+
+  try {
+    const r = await fetch('/v1/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    container.textContent = '';
+
+    const meta = txt('div', 'hits-meta', fmt(data.total_hits) + ' resultados · ' + data.took_ms + 'ms');
+    container.appendChild(meta);
+
+    if (!data.hits || data.hits.length === 0) {
+      container.appendChild(txt('div', 'empty', 'Sin resultados'));
+      return;
+    }
+
+    const wrap = el('div', 'results-wrap');
+
+    // Hits list
+    const hitsList = el('div');
+    data.hits.forEach(h => {
+      const item = el('div', 'result-item');
+      item.appendChild(txt('div', 'result-title', h.title));
+      const metaRow = el('div', 'result-meta');
+      const price = txt('span', 'tag tag-price', '$' + h.price.toFixed(2));
+      const cat2 = txt('span', 'tag', h.category);
+      const score = txt('span', 'tag tag-score', 'score: ' + h.score.toFixed(2));
+      const id = txt('span', 'tag', 'id: ' + h.id);
+      [price, cat2, score, id].forEach(t => metaRow.appendChild(t));
+      item.appendChild(metaRow);
+      hitsList.appendChild(item);
+    });
+    wrap.appendChild(hitsList);
+
+    // Facets
+    if (data.aggregations && data.aggregations.category && data.aggregations.category.length) {
+      const facetsCard = el('div', 'facets-card');
+      facetsCard.appendChild(txt('div', 'facets-title', 'Categorías'));
+      data.aggregations.category.forEach(f => {
+        const row = el('div', 'facet-row');
+        row.appendChild(txt('span', 'facet-val', f.value));
+        row.appendChild(txt('span', 'facet-cnt', fmt(f.count)));
+        facetsCard.appendChild(row);
+      });
+      wrap.appendChild(facetsCard);
+    }
+
+    container.appendChild(wrap);
+  } catch(e) {
+    container.textContent = '';
+    container.appendChild(txt('div', 'err', 'Error: ' + e.message));
+  }
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

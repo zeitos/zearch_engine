@@ -1,0 +1,9 @@
+[package]
+name = "search-analysis"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+search-core = { workspace = true }
+rust-stemmers = { workspace = true }
+unicode-segmentation = { workspace = true }

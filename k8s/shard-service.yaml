@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-headless
+  namespace: search
+  labels:
+    app: shard
+spec:
+  clusterIP: None   # headless — enables per-pod DNS: shard-N.shard-headless.search.svc
+  selector:
+    app: shard
+  ports:
+    - name: grpc
+      port: 9001
+      targetPort: grpc
+      protocol: TCP

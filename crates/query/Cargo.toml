@@ -1,0 +1,13 @@
+[package]
+name = "search-query"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+search-core = { workspace = true }
+search-index = { workspace = true }
+search-analysis = { workspace = true }
+roaring = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

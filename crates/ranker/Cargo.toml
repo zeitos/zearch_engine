@@ -1,0 +1,18 @@
+[package]
+name = "search-ranker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+search-core = { workspace = true }
+search-proto = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+wasmtime = { workspace = true }
+tracing = { workspace = true }
+metrics = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }

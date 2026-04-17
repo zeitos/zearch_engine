@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package ranker;
+
+service RankerService {
+    rpc Rerank (RerankRequest) returns (RerankResponse);
+}
+
+message RerankRequest {
+    string query = 1;
+    repeated RankCandidate candidates = 2;
+}
+
+message RankCandidate {
+    uint64 doc_id = 1;
+    float bm25_score = 2;
+    string title = 3;
+    string category = 4;
+    double price = 5;
+    map<string, string> attributes = 6;
+}
+
+message RerankResponse {
+    repeated RankedResult results = 1;
+}
+
+message RankedResult {
+    uint64 doc_id = 1;
+    float score = 2;
+}

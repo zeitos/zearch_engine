@@ -1,0 +1,20 @@
+[package]
+name = "search-shard"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+search-core = { workspace = true }
+search-proto = { workspace = true }
+search-index = { workspace = true }
+search-query = { workspace = true }
+search-analysis = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+serde_json = { workspace = true }
+tempfile = "3"
+
+[dev-dependencies]

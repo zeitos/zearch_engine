@@ -1,0 +1,22 @@
+[package]
+name = "search-router"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+search-core = { workspace = true }
+search-proto = { workspace = true }
+search-shard = { workspace = true }
+search-ranker = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+metrics = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }
+async-trait = { workspace = true }
+search-ranker = { workspace = true }
