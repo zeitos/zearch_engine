@@ -98,9 +98,6 @@ impl QueryExecutor {
         request: &SearchRequest,
         filter: Option<&RoaringBitmap>,
     ) -> search_core::Result<Vec<ScoredDoc>> {
-        // Collect candidate doc_ids from the inverted index (global, no field distinction)
-        let mut candidate_doc_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
-
         // Use the first (or highest-boost) text field's analyzer to tokenize the query
         let query_analyzer = self
             .schema
@@ -112,7 +109,11 @@ impl QueryExecutor {
 
         let query_tokens = query_analyzer.analyze(&request.query);
 
+        // Collect per-token doc sets, then intersect (AND semantics).
+        // This prevents a doc matching only "15" from ranking above one matching "iphone 15".
+        let mut per_token_sets: Vec<std::collections::HashSet<u32>> = Vec::new();
         for token in &query_tokens {
+            let mut token_docs: std::collections::HashSet<u32> = std::collections::HashSet::new();
             let posting_lists = if token.text.len() <= 4 {
                 // Short terms: prefix search so "bici" matches "bicicleta"
                 let mut results = reader.prefix_search_term(&token.text);
@@ -134,10 +135,20 @@ impl QueryExecutor {
             };
             for (_, pl) in posting_lists {
                 for posting in &pl.postings {
-                    candidate_doc_ids.insert(posting.doc_id);
+                    token_docs.insert(posting.doc_id);
                 }
             }
+            per_token_sets.push(token_docs);
         }
+
+        // Intersect all per-token sets so every query token must be present
+        let candidate_doc_ids: std::collections::HashSet<u32> = if per_token_sets.is_empty() {
+            std::collections::HashSet::new()
+        } else {
+            let mut iter = per_token_sets.into_iter();
+            let first = iter.next().unwrap();
+            iter.fold(first, |acc, set| acc.intersection(&set).copied().collect())
+        };
 
         // For each candidate doc, compute per-field BM25 by re-analyzing the document's fields
         let mut result = Vec::new();
