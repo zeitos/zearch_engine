@@ -110,6 +110,27 @@ async fn index_doc(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
 }
 
+async fn bulk_index(
+    State(state): State<AppState>,
+    Json(docs): Json<Vec<Document>>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if docs.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "empty batch" }))));
+    }
+    if docs.len() > 10_000 {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "batch exceeds 10,000 documents" }))));
+    }
+    if docs.iter().any(|d| d.title.is_empty()) {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "all documents must have a title" }))));
+    }
+    state
+        .router
+        .bulk_index(docs)
+        .await
+        .map(|indexed| Json(json!({ "indexed": indexed })))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
+}
+
 async fn delete_doc(
     State(state): State<AppState>,
     Path(id): Path<u64>,
@@ -154,6 +175,7 @@ fn build_http_app(router: Arc<search_router::Router>, metrics: PrometheusHandle)
         .route("/v1/health", get(health))
         .route("/v1/search", post(search))
         .route("/v1/index", post(index_doc))
+        .route("/v1/bulk", post(bulk_index))
         .route("/v1/index/{id}", delete(delete_doc))
         .route("/v1/stats", get(stats))
         .route("/metrics", get(prometheus_metrics))

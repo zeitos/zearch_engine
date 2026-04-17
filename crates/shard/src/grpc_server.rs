@@ -2,10 +2,11 @@ use crate::shard::ShardEngine;
 use search_core::{Document, FilterValue, SearchRequest, SortOrder, SortSpec, Value};
 use search_proto::shard::shard_service_server::ShardService;
 use search_proto::shard::{
-    filter_value, AggregationBucket, AggregationResult, DeleteRequest, DeleteResponse,
-    DocumentProto, GetDocsRequest, GetDocsResponse, HealthRequest, HealthResponse, IndexRequest,
-    IndexResponse, ScoredDocument, SearchRequest as ProtoSearchRequest,
-    SearchResponse as ProtoSearchResponse, SortOrder as ProtoSortOrder, StatsRequest, StatsResponse,
+    filter_value, AggregationBucket, AggregationResult, BulkIndexRequest, BulkIndexResponse,
+    DeleteRequest, DeleteResponse, DocumentProto, GetDocsRequest, GetDocsResponse, HealthRequest,
+    HealthResponse, IndexRequest, IndexResponse, ScoredDocument,
+    SearchRequest as ProtoSearchRequest, SearchResponse as ProtoSearchResponse,
+    SortOrder as ProtoSortOrder, StatsRequest, StatsResponse,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -153,6 +154,18 @@ impl ShardService for ShardGrpcServer {
             .index(doc)
             .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(IndexResponse { success: true }))
+    }
+
+    async fn bulk_index(
+        &self,
+        request: Request<BulkIndexRequest>,
+    ) -> Result<Response<BulkIndexResponse>, Status> {
+        let docs: Vec<Document> = request.into_inner().documents.into_iter().map(proto_to_doc).collect();
+        let count = docs.len() as u32;
+        self.shard
+            .index_batch(docs)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(BulkIndexResponse { indexed: count }))
     }
 
     async fn delete(

@@ -90,6 +90,28 @@ impl ShardEngine {
         Ok(())
     }
 
+    /// Index a batch of documents: single WAL fsync for the whole batch.
+    pub fn index_batch(&self, docs: Vec<Document>) -> search_core::Result<()> {
+        let wal_entries: Vec<WalEntry> = docs.iter().map(|d| WalEntry::Index(d.clone())).collect();
+        {
+            let mut wal = self.wal.lock().unwrap();
+            wal.append_batch(&wal_entries)?;
+        }
+        let mut needs_flush = false;
+        {
+            let mut buf = self.write_buffer.write().unwrap();
+            for doc in docs {
+                if buf.add(doc) {
+                    needs_flush = true;
+                }
+            }
+        }
+        if needs_flush {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
     /// Delete a document by global doc_id.
     pub fn delete(&self, doc_id: u64) -> search_core::Result<()> {
         {

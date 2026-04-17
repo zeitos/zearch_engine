@@ -6,6 +6,7 @@ service ShardService {
     rpc Search (SearchRequest) returns (SearchResponse);
     rpc GetDocs (GetDocsRequest) returns (GetDocsResponse);
     rpc Index (IndexRequest) returns (IndexResponse);
+    rpc BulkIndex (BulkIndexRequest) returns (BulkIndexResponse);
     rpc Delete (DeleteRequest) returns (DeleteResponse);
     rpc Stats (StatsRequest) returns (StatsResponse);
     rpc Health (HealthRequest) returns (HealthResponse);
@@ -104,6 +105,14 @@ message IndexRequest {
 
 message IndexResponse {
     bool success = 1;
+}
+
+message BulkIndexRequest {
+    repeated DocumentProto documents = 1;
+}
+
+message BulkIndexResponse {
+    uint32 indexed = 1;
 }
 
 // ---------------------------------------------------------------------------

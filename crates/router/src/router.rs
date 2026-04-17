@@ -179,6 +179,26 @@ impl Router {
         self.shards[shard_idx].index(doc).await
     }
 
+    /// Bulk index: group docs by target shard, send each group in parallel.
+    pub async fn bulk_index(&self, docs: Vec<Document>) -> search_core::Result<u32> {
+        let mut by_shard: Vec<Vec<Document>> = vec![Vec::new(); self.shards.len()];
+        for doc in docs {
+            by_shard[self.shard_for(doc.id)].push(doc);
+        }
+        let mut tasks = Vec::new();
+        for (shard, batch) in self.shards.iter().zip(by_shard.into_iter()) {
+            if batch.is_empty() { continue; }
+            let shard = shard.clone();
+            tasks.push(tokio::spawn(async move { shard.bulk(batch).await }));
+        }
+        let mut total = 0u32;
+        for t in tasks {
+            total += t.await.map_err(|e| search_core::Error::Internal(e.to_string()))??;
+        }
+        metrics::counter!("index_docs_total").increment(total as u64);
+        Ok(total)
+    }
+
     /// Delete a document — try all shards (we don't know which has it).
     pub async fn delete(&self, doc_id: u64) -> search_core::Result<()> {
         let shard_idx = self.shard_for(doc_id);

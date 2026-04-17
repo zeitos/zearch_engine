@@ -15,6 +15,7 @@ pub struct ShardSearchResult {
 pub trait ShardClient: Send + Sync {
     async fn search(&self, request: SearchRequest) -> search_core::Result<ShardSearchResult>;
     async fn index(&self, doc: Document) -> search_core::Result<()>;
+    async fn bulk(&self, docs: Vec<Document>) -> search_core::Result<u32>;
     async fn delete(&self, doc_id: u64) -> search_core::Result<()>;
     async fn get_docs(&self, doc_ids: &[u64]) -> search_core::Result<Vec<Document>>;
     async fn stats(&self) -> search_core::Result<search_shard::ShardStats>;
@@ -54,6 +55,12 @@ impl ShardClient for LocalShardClient {
         self.shard.index(doc)
     }
 
+    async fn bulk(&self, docs: Vec<Document>) -> search_core::Result<u32> {
+        let count = docs.len() as u32;
+        self.shard.index_batch(docs)?;
+        Ok(count)
+    }
+
     async fn delete(&self, doc_id: u64) -> search_core::Result<()> {
         self.shard.delete(doc_id)
     }
@@ -77,10 +84,10 @@ impl ShardClient for LocalShardClient {
 
 use search_proto::shard::shard_service_client::ShardServiceClient;
 use search_proto::shard::{
-    filter_value, AggregationResult, DeleteRequest, DocumentProto, FilterValue as ProtoFilterValue,
-    GetDocsRequest, HealthRequest, IndexRequest, MultiValueFilter, RangeFilter,
-    SearchRequest as ProtoSearchRequest, SortOrder as ProtoSortOrder, SortSpec as ProtoSortSpec,
-    StatsRequest,
+    filter_value, AggregationResult, BulkIndexRequest, DeleteRequest, DocumentProto,
+    FilterValue as ProtoFilterValue, GetDocsRequest, HealthRequest, IndexRequest, MultiValueFilter,
+    RangeFilter, SearchRequest as ProtoSearchRequest, SortOrder as ProtoSortOrder,
+    SortSpec as ProtoSortSpec, StatsRequest,
 };
 use search_core::{FilterValue, SortOrder, Value};
 use tonic::transport::Channel;
@@ -205,6 +212,17 @@ impl ShardClient for RemoteShardClient {
             .await
             .map_err(|e| search_core::Error::Grpc(e.to_string()))?;
         Ok(())
+    }
+
+    async fn bulk(&self, docs: Vec<Document>) -> search_core::Result<u32> {
+        let mut client = self.connect().await?;
+        let documents: Vec<DocumentProto> = docs.into_iter().map(doc_to_proto).collect();
+        let resp = client
+            .bulk_index(tonic::Request::new(BulkIndexRequest { documents }))
+            .await
+            .map_err(|e| search_core::Error::Grpc(e.to_string()))?
+            .into_inner();
+        Ok(resp.indexed)
     }
 
     async fn delete(&self, doc_id: u64) -> search_core::Result<()> {

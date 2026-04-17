@@ -28,11 +28,18 @@ impl WriteAheadLog {
 
     /// Append an entry and fsync.
     pub fn append(&mut self, entry: &WalEntry) -> search_core::Result<()> {
-        let encoded = bincode::serialize(entry)
-            .map_err(|e| search_core::Error::Wal(e.to_string()))?;
-        let len = encoded.len() as u32;
-        self.file.write_all(&len.to_le_bytes()).map_err(search_core::Error::Io)?;
-        self.file.write_all(&encoded).map_err(search_core::Error::Io)?;
+        self.append_batch(std::slice::from_ref(entry))
+    }
+
+    /// Append multiple entries with a single fsync.
+    pub fn append_batch(&mut self, entries: &[WalEntry]) -> search_core::Result<()> {
+        for entry in entries {
+            let encoded = bincode::serialize(entry)
+                .map_err(|e| search_core::Error::Wal(e.to_string()))?;
+            let len = encoded.len() as u32;
+            self.file.write_all(&len.to_le_bytes()).map_err(search_core::Error::Io)?;
+            self.file.write_all(&encoded).map_err(search_core::Error::Io)?;
+        }
         self.file.flush().map_err(search_core::Error::Io)?;
         self.file.sync_data().map_err(search_core::Error::Io)?;
         Ok(())
