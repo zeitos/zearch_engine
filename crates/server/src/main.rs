@@ -1,5 +1,6 @@
 use axum::{
-    extract::{Path, State},
+    body::Bytes,
+    extract::{Path, Request, State},
     http::StatusCode,
     routing::{delete, get, post},
     Json, Router,
@@ -134,26 +135,64 @@ async fn bulk_index(
 
 async fn meli_bulk(
     State(state): State<AppState>,
-    Json(items): Json<Vec<MeliItem>>,
+    request: Request,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let content_type = request
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let body = axum::body::to_bytes(request.into_body(), 256 * 1024 * 1024)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))))?;
+
+    let items: Vec<MeliItem> = if content_type.contains("ndjson")
+        || content_type.contains("jsonlines")
+        || content_type.contains("jsonl")
+    {
+        parse_jsonl(&body)
+            .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))))?
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() }))))?
+    };
+
     if items.is_empty() {
         return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "empty batch" }))));
     }
     if items.len() > 10_000 {
         return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "batch exceeds 10,000 items" }))));
     }
+
     let (docs, errors) = MeliMapper::map_batch(items);
     let indexed = docs.len();
     let skipped: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+
     if indexed == 0 {
         return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "all items failed mapping", "details": skipped }))));
     }
+
     state
         .router
         .bulk_index(docs)
         .await
         .map(|_| Json(json!({ "indexed": indexed, "skipped": skipped.len(), "errors": skipped })))
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
+}
+
+fn parse_jsonl(body: &Bytes) -> Result<Vec<MeliItem>, String> {
+    let text = std::str::from_utf8(body).map_err(|e| e.to_string())?;
+    let mut items = Vec::new();
+    for (line_num, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+        let item: MeliItem = serde_json::from_str(line)
+            .map_err(|e| format!("line {}: {}", line_num + 1, e))?;
+        items.push(item);
+    }
+    Ok(items)
 }
 
 async fn delete_doc(
