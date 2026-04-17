@@ -8,6 +8,7 @@ search-core = { workspace = true }
 search-proto = { workspace = true }
 search-ranker = { workspace = true }
 search-router = { workspace = true }
+search-meli = { path = "../meli" }
 search-shard = { workspace = true }
 tonic = { workspace = true }
 tokio = { workspace = true }

@@ -1936,6 +1936,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "search-core",
+ "search-meli",
  "search-proto",
  "search-ranker",
  "search-router",
@@ -1961,6 +1962,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+]
+
+[[package]]
+name = "search-meli"
+version = "0.1.0"
+dependencies = [
+ "search-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

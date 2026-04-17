@@ -7,6 +7,7 @@ use axum::{
 use clap::Parser;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use search_core::{config::Mode, Document, SearchRequest, ShardConfig};
+use search_meli::{MeliItem, MeliMapper};
 use search_ranker::{NoopRanker, RankerFactory};
 use search_router::{LocalShardClient, RemoteShardClient, ShardClient};
 use search_shard::ShardEngine;
@@ -131,6 +132,30 @@ async fn bulk_index(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
 }
 
+async fn meli_bulk(
+    State(state): State<AppState>,
+    Json(items): Json<Vec<MeliItem>>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if items.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "empty batch" }))));
+    }
+    if items.len() > 10_000 {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "batch exceeds 10,000 items" }))));
+    }
+    let (docs, errors) = MeliMapper::map_batch(items);
+    let indexed = docs.len();
+    let skipped: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+    if indexed == 0 {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "all items failed mapping", "details": skipped }))));
+    }
+    state
+        .router
+        .bulk_index(docs)
+        .await
+        .map(|_| Json(json!({ "indexed": indexed, "skipped": skipped.len(), "errors": skipped })))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))))
+}
+
 async fn delete_doc(
     State(state): State<AppState>,
     Path(id): Path<u64>,
@@ -176,6 +201,7 @@ fn build_http_app(router: Arc<search_router::Router>, metrics: PrometheusHandle)
         .route("/v1/search", post(search))
         .route("/v1/index", post(index_doc))
         .route("/v1/bulk", post(bulk_index))
+        .route("/v1/meli/bulk", post(meli_bulk))
         .route("/v1/index/{id}", delete(delete_doc))
         .route("/v1/stats", get(stats))
         .route("/metrics", get(prometheus_metrics))
