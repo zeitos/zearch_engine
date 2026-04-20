@@ -11,6 +11,11 @@ service ShardService {
     rpc Stats (StatsRequest) returns (StatsResponse);
     rpc Health (HealthRequest) returns (HealthResponse);
     rpc Flush (FlushRequest) returns (FlushResponse);
+    rpc Reindex (ReindexRequest) returns (ReindexResponse);
+    rpc Replicate (ReplicateRequest) returns (ReplicateResponse);
+    rpc ReplicateCatchUp (CatchUpRequest) returns (stream ReplicateRequest);
+    rpc FullSync (FullSyncRequest) returns (stream DocumentProto);
+    rpc Suggest (SuggestRequest) returns (SuggestResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +64,7 @@ message SearchResponse {
     repeated ScoredDocument hits = 1;
     uint64 total_hits = 2;
     map<string, AggregationResult> aggregations = 3;
+    string retrieval_mode = 4;
 }
 
 message ScoredDocument {
@@ -156,4 +162,58 @@ message FlushRequest {}
 
 message FlushResponse {
     uint32 segments_created = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Reindex
+// ---------------------------------------------------------------------------
+
+message ReindexRequest {}
+
+message ReindexResponse {
+    uint32 shard_id = 1;
+    uint64 docs_reindexed = 2;
+    uint64 elapsed_ms = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Replication
+// ---------------------------------------------------------------------------
+
+message ReplicateRequest {
+    oneof operation {
+        DocumentProto index_doc = 1;
+        uint64 delete_doc_id = 2;
+        bool flush = 3;
+    }
+    uint64 wal_seq = 4;
+}
+
+message ReplicateResponse {
+    bool ok = 1;
+}
+
+message CatchUpRequest {
+    uint64 from_wal_seq = 1;
+}
+
+message FullSyncRequest {}
+
+// ---------------------------------------------------------------------------
+// Suggest (autocomplete)
+// ---------------------------------------------------------------------------
+
+message SuggestRequest {
+    string prefix = 1;
+    string field  = 2;
+    uint32 limit  = 3;
+}
+
+message SuggestResponse {
+    repeated SuggestEntry entries = 1;
+}
+
+message SuggestEntry {
+    string term  = 1;
+    float  score = 2;
 }

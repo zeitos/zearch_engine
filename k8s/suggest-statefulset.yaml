@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: suggest
+  namespace: search
+  labels:
+    app: suggest
+spec:
+  serviceName: suggest-headless
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: suggest
+  template:
+    metadata:
+      labels:
+        app: suggest
+    spec:
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: suggest
+          image: search-engine:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--mode=suggest"
+            - "--config=/etc/search/suggest-config.yaml"
+          ports:
+            - name: grpc
+              containerPort: 9002
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 9002
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 9002
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/search
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: search-engine-config
+            items:
+              - key: suggest-config.yaml
+                path: suggest-config.yaml

@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: search-engine
+  namespace: search
+  labels:
+    # Must match the Prometheus Operator's serviceMonitorSelector in your Prometheus CR.
+    # Adjust the label value to match your cluster's convention (e.g. "kube-prometheus").
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: router
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

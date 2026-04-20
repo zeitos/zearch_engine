@@ -20,6 +20,9 @@
   .shard-card.warning { border-left-color: #f59e0b; }
   .shard-card-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #64748b; margin-bottom: 6px; }
   .shard-card-name { font-size: 1rem; font-weight: 600; color: #f8fafc; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .replica-section { margin-top: 12px; border-top: 1px solid #2d3148; padding-top: 10px; }
+  .replica-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: #6366f1; margin-bottom: 6px; }
+  .replica-row { display: flex; justify-content: space-between; font-size: 0.75rem; color: #94a3b8; padding: 2px 0; }
   .metric { display: flex; justify-content: space-between; margin-bottom: 6px; }
   .metric-label { font-size: 0.8rem; color: #94a3b8; }
   .metric-value { font-size: 0.8rem; font-weight: 600; color: #e2e8f0; }
@@ -145,7 +148,7 @@ async function refresh() {
 
       const card = el('div', 'shard-card' + (hasBuffer ? ' warning' : ''));
 
-      card.appendChild(txt('div', 'shard-card-label', 'Shard'));
+      card.appendChild(txt('div', 'shard-card-label', 'Shard · Primario'));
 
       const nameRow = el('div', 'shard-card-name');
       nameRow.appendChild(document.createTextNode('#' + s.shard_id + ' '));
@@ -166,6 +169,23 @@ async function refresh() {
       bar.style.width = pct + '%';
       prog.appendChild(bar);
       card.appendChild(prog);
+
+      // Replicas
+      const replicas = Array.isArray(s.replicas) ? s.replicas : [];
+      if (replicas.length > 0) {
+        const repSection = el('div', 'replica-section');
+        repSection.appendChild(txt('div', 'replica-label', `↳ ${replicas.length} réplica${replicas.length > 1 ? 's' : ''}`));
+        replicas.forEach((r, i) => {
+          const row = el('div', 'replica-row');
+          row.appendChild(document.createTextNode(`réplica-${i} · ${fmt(r.doc_count)} docs · ${r.segment_count} segs`));
+          const rbadge = el('span', 'badge badge-green');
+          rbadge.textContent = 'sync';
+          rbadge.style.marginLeft = '6px';
+          row.appendChild(rbadge);
+          repSection.appendChild(row);
+        });
+        card.appendChild(repSection);
+      }
 
       grid.appendChild(card);
     });

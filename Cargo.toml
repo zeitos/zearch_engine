@@ -11,6 +11,7 @@ members = [
     "crates/router",
     "crates/server",
     "crates/meli",
+    "crates/suggest",
 ]
 
 [workspace.package]
@@ -28,15 +29,19 @@ search-query = { path = "crates/query" }
 search-shard = { path = "crates/shard" }
 search-ranker = { path = "crates/ranker" }
 search-router = { path = "crates/router" }
+search-suggest = { path = "crates/suggest" }
 
 # WASM runtime
 wasmtime = "21"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1" }
 
 # HTTP
 axum = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+moka = { version = "0.12", features = ["future"] }
 
 # gRPC
 tonic = "0.12"
@@ -60,9 +65,19 @@ roaring = "0.10"
 rust-stemmers = "1"
 unicode-segmentation = "1"
 
-# Logging
+# Logging / tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.27"
+
+# OpenTelemetry
+opentelemetry = { version = "0.26", features = ["trace"] }
+opentelemetry_sdk = { version = "0.26", features = ["rt-tokio", "trace"] }
+opentelemetry-otlp = { version = "0.26", features = ["grpc-tonic"] }
+opentelemetry-semantic-conventions = "0.26"
+
+# HTTP middleware
+tower-http = { version = "0.6", features = ["trace"] }
 
 # Error handling
 thiserror = "2"

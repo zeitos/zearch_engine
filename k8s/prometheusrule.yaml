@@ -1,0 +1,99 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: search-engine
+  namespace: search
+  labels:
+    release: prometheus
+spec:
+  groups:
+    - name: search-engine.latency
+      interval: 30s
+      rules:
+        - alert: SearchHighP99Latency
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(search_query_duration_seconds_bucket[5m])) by (le)
+            ) > 0.5
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Search p99 latency above 500ms"
+            description: "p99 query latency is {{ $value | humanizeDuration }} over the last 5 minutes."
+
+        - alert: SearchHighP99LatencyCritical
+          expr: |
+            histogram_quantile(0.99,
+              sum(rate(search_query_duration_seconds_bucket[5m])) by (le)
+            ) > 2
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Search p99 latency above 2s"
+            description: "p99 query latency is {{ $value | humanizeDuration }}. Possible shard overload."
+
+    - name: search-engine.errors
+      interval: 30s
+      rules:
+        - alert: SearchHighErrorRate
+          expr: |
+            sum(rate(search_queries_total[5m])) == 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "No search queries being processed"
+            description: "Router is receiving no queries or all queries are failing."
+
+        - alert: ShardCircuitBreakerOpen
+          expr: |
+            increase(shard_circuit_open_total[5m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Shard circuit breaker opened"
+            description: "A shard endpoint circuit breaker opened. Check shard health."
+
+    - name: search-engine.ranker
+      interval: 60s
+      rules:
+        - alert: RankerHighFallbackRate
+          expr: |
+            rate(ranker_fallbacks_total[5m]) /
+            (rate(ranker_requests_total[5m]) + 0.001) > 0.1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Re-ranker fallback rate above 10%"
+            description: "{{ $value | humanizePercentage }} of re-rank requests are timing out and falling back to BM25."
+
+    - name: search-engine.cache
+      interval: 60s
+      rules:
+        - alert: SearchCacheLowHitRate
+          expr: |
+            rate(search_cache_hits_total[10m]) /
+            (rate(search_cache_hits_total[10m]) + rate(search_cache_misses_total[10m]) + 0.001) < 0.2
+          for: 10m
+          labels:
+            severity: info
+          annotations:
+            summary: "Query cache hit rate below 20%"
+            description: "Cache hit rate is {{ $value | humanizePercentage }}. Consider increasing TTL or cache size."
+
+    - name: search-engine.availability
+      interval: 60s
+      rules:
+        - alert: AvailabilityStockServiceErrors
+          expr: |
+            rate(availability_stock_service_errors_total[5m]) > 0.5
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Stock service returning errors"
+            description: "Availability stock service is failing at {{ $value }} errors/sec. Queries are fail-open."

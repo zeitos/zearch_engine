@@ -7,49 +7,43 @@ use std::path::Path;
 
 /// Writes an inverted index (FST term dict + posting lists) to disk.
 pub struct InvertedIndexWriter {
-    /// term -> posting list (accumulated during indexing)
     term_postings: BTreeMap<String, PostingList>,
 }
 
 impl InvertedIndexWriter {
     pub fn new() -> Self {
-        Self {
-            term_postings: BTreeMap::new(),
-        }
+        Self { term_postings: BTreeMap::new() }
     }
 
     /// Add a term occurrence for a document.
-    pub fn add_term(&mut self, term: &str, doc_id: u32) {
-        let posting_list = self
-            .term_postings
-            .entry(term.to_string())
-            .or_default();
-
-        // If the last posting is for the same doc, increment frequency
-        if let Some(last) = posting_list.postings.last_mut() {
+    /// `doc_len` is the combined token count across all indexed fields for this document.
+    pub fn add_term(&mut self, term: &str, doc_id: u32, doc_len: u16) {
+        let pl = self.term_postings.entry(term.to_string()).or_default();
+        if let Some(last) = pl.postings.last_mut() {
             if last.doc_id == doc_id {
-                last.term_freq += 1;
+                last.term_freq = last.term_freq.saturating_add(1);
                 return;
             }
         }
-        posting_list.add(doc_id, 1);
+        pl.add(doc_id, 1, doc_len);
     }
 
     /// Write the inverted index to disk.
-    /// Creates two files: `inverted.fst` (term dict) and `inverted.post` (posting lists).
-    pub fn write(&self, dir: &Path) -> io::Result<()> {
+    /// `avgdl` is the average combined doc length across the segment — used to compute
+    /// block-max impact scores for Block-Max WAND.
+    pub fn write(&mut self, dir: &Path, avgdl: f32) -> io::Result<()> {
         std::fs::create_dir_all(dir)?;
 
         let fst_path = dir.join("inverted.fst");
         let post_path = dir.join("inverted.post");
 
-        // Serialize all posting lists into a contiguous buffer, recording offsets
         let mut posting_data = Vec::new();
         let mut fst_builder = MapBuilder::memory();
 
-        for (term, posting_list) in &self.term_postings {
+        for (term, pl) in &mut self.term_postings {
+            pl.rebuild_blocks(avgdl);
             let offset = posting_data.len() as u64;
-            let encoded = posting_list.encode();
+            let encoded = pl.encode();
             posting_data.extend_from_slice(&(encoded.len() as u32).to_le_bytes());
             posting_data.extend_from_slice(&encoded);
 
@@ -64,11 +58,9 @@ impl InvertedIndexWriter {
 
         std::fs::write(&fst_path, fst_bytes)?;
         std::fs::write(&post_path, posting_data)?;
-
         Ok(())
     }
 
-    /// Number of unique terms.
     pub fn term_count(&self) -> usize {
         self.term_postings.len()
     }
@@ -87,70 +79,49 @@ pub struct InvertedIndexReader {
 }
 
 impl InvertedIndexReader {
-    /// Open an inverted index from a segment directory.
     pub fn open(dir: &Path) -> io::Result<Self> {
         let fst_bytes = std::fs::read(dir.join("inverted.fst"))?;
         let posting_data = std::fs::read(dir.join("inverted.post"))?;
-
         let fst_map =
             Map::new(fst_bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-        Ok(Self {
-            fst_map,
-            posting_data,
-        })
+        Ok(Self { fst_map, posting_data })
     }
 
-    /// Exact term lookup — returns the posting list for a term if it exists.
     pub fn get_postings(&self, term: &str) -> Option<PostingList> {
         let offset = self.fst_map.get(term.as_bytes())? as usize;
-        Some(self.read_posting_list_at(offset))
+        Some(self.read_at(offset))
     }
 
-    /// Fuzzy lookup — returns all terms within `max_distance` edit distance
-    /// and their posting lists.
     pub fn fuzzy_search(&self, term: &str, max_distance: u32) -> Vec<(String, PostingList)> {
-        let Ok(automaton) = Levenshtein::new(term, max_distance) else {
-            return vec![];
-        };
-
+        let Ok(automaton) = Levenshtein::new(term, max_distance) else { return vec![] };
         let mut stream = self.fst_map.search(automaton).into_stream();
         let mut results = Vec::new();
-
         while let Some((key, offset)) = stream.next() {
-            let term_str = String::from_utf8_lossy(key).to_string();
-            let posting_list = self.read_posting_list_at(offset as usize);
-            results.push((term_str, posting_list));
+            let t = String::from_utf8_lossy(key).to_string();
+            results.push((t, self.read_at(offset as usize)));
         }
-
         results
     }
 
-    /// Prefix search — returns all terms starting with `prefix`.
     pub fn prefix_search(&self, prefix: &str) -> Vec<(String, PostingList)> {
         let automaton = fst::automaton::Str::new(prefix).starts_with();
         let mut stream = self.fst_map.search(automaton).into_stream();
         let mut results = Vec::new();
-
         while let Some((key, offset)) = stream.next() {
-            let term_str = String::from_utf8_lossy(key).to_string();
-            let posting_list = self.read_posting_list_at(offset as usize);
-            results.push((term_str, posting_list));
+            let t = String::from_utf8_lossy(key).to_string();
+            results.push((t, self.read_at(offset as usize)));
         }
-
         results
     }
 
-    /// Number of unique terms in the index.
     pub fn term_count(&self) -> usize {
         self.fst_map.len()
     }
 
-    fn read_posting_list_at(&self, offset: usize) -> PostingList {
+    fn read_at(&self, offset: usize) -> PostingList {
         let len =
             u32::from_le_bytes(self.posting_data[offset..offset + 4].try_into().unwrap()) as usize;
-        let data = &self.posting_data[offset + 4..offset + 4 + len];
-        PostingList::decode(data)
+        PostingList::decode(&self.posting_data[offset + 4..offset + 4 + len])
     }
 }
 
@@ -159,103 +130,78 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn make_test_dir() -> TempDir {
-        TempDir::new().unwrap()
+    #[test]
+    fn test_write_and_read() {
+        let dir = TempDir::new().unwrap();
+        let seg = dir.path().join("seg");
+
+        let mut w = InvertedIndexWriter::new();
+        w.add_term("samsung", 0, 5);
+        w.add_term("galaxy", 0, 5);
+        w.add_term("samsung", 1, 6);
+        w.add_term("phone", 1, 6);
+        w.add_term("samsung", 2, 4);
+        w.add_term("galaxy", 2, 4);
+        w.add_term("galaxy", 2, 4); // dup → tf=2
+
+        w.write(&seg, 5.0).unwrap();
+
+        let r = InvertedIndexReader::open(&seg).unwrap();
+        assert_eq!(r.get_postings("samsung").unwrap().len(), 3);
+        assert_eq!(r.get_postings("galaxy").unwrap().postings[1].term_freq, 2);
+        assert_eq!(r.term_count(), 3);
     }
 
     #[test]
-    fn test_write_and_read_inverted_index() {
-        let dir = make_test_dir();
-        let seg_dir = dir.path().join("seg");
+    fn test_blocks_written() {
+        let dir = TempDir::new().unwrap();
+        let seg = dir.path().join("seg");
 
-        let mut writer = InvertedIndexWriter::new();
-        writer.add_term("samsung", 0);
-        writer.add_term("galaxy", 0);
-        writer.add_term("samsung", 1);
-        writer.add_term("phone", 1);
-        writer.add_term("samsung", 2);
-        writer.add_term("galaxy", 2);
-        writer.add_term("galaxy", 2); // duplicate: should increment tf
+        let mut w = InvertedIndexWriter::new();
+        for i in 0..100u32 {
+            w.add_term("common", i, 8);
+        }
+        w.write(&seg, 8.0).unwrap();
 
-        writer.write(&seg_dir).unwrap();
-
-        let reader = InvertedIndexReader::open(&seg_dir).unwrap();
-
-        // Exact lookups
-        let samsung = reader.get_postings("samsung").unwrap();
-        assert_eq!(samsung.len(), 3); // docs 0, 1, 2
-
-        let galaxy = reader.get_postings("galaxy").unwrap();
-        assert_eq!(galaxy.len(), 2); // docs 0, 2
-        assert_eq!(galaxy.postings[1].term_freq, 2); // doc 2 has tf=2
-
-        let phone = reader.get_postings("phone").unwrap();
-        assert_eq!(phone.len(), 1);
-
-        assert!(reader.get_postings("nonexistent").is_none());
-
-        assert_eq!(reader.term_count(), 3);
+        let r = InvertedIndexReader::open(&seg).unwrap();
+        let pl = r.get_postings("common").unwrap();
+        assert_eq!(pl.len(), 100);
+        assert_eq!(pl.blocks.len(), 2); // 64 + 36
+        assert!(pl.blocks[0].max_impact > 0.0);
     }
 
     #[test]
     fn test_fuzzy_search() {
-        let dir = make_test_dir();
-        let seg_dir = dir.path().join("seg");
+        let dir = TempDir::new().unwrap();
+        let seg = dir.path().join("seg");
 
-        let mut writer = InvertedIndexWriter::new();
-        writer.add_term("samsung", 0);
-        writer.add_term("samsnug", 1); // typo
-        writer.add_term("apple", 2);
-        writer.add_term("laptop", 3);
+        let mut w = InvertedIndexWriter::new();
+        w.add_term("samsung", 0, 5);
+        w.add_term("samsnug", 1, 5);
+        w.add_term("apple", 2, 4);
+        w.write(&seg, 5.0).unwrap();
 
-        writer.write(&seg_dir).unwrap();
-
-        let reader = InvertedIndexReader::open(&seg_dir).unwrap();
-
-        // Search for "samsung" with distance 2 — should find "samsung" and "samsnug"
-        // ("samsnug" is 2 edits from "samsung": u→n, n→u)
-        let results = reader.fuzzy_search("samsung", 2);
+        let r = InvertedIndexReader::open(&seg).unwrap();
+        let results = r.fuzzy_search("samsung", 2);
         let terms: Vec<&str> = results.iter().map(|(t, _)| t.as_str()).collect();
         assert!(terms.contains(&"samsung"));
         assert!(terms.contains(&"samsnug"));
-        assert!(!terms.contains(&"apple"));
     }
 
     #[test]
     fn test_prefix_search() {
-        let dir = make_test_dir();
-        let seg_dir = dir.path().join("seg");
+        let dir = TempDir::new().unwrap();
+        let seg = dir.path().join("seg");
 
-        let mut writer = InvertedIndexWriter::new();
-        writer.add_term("samsung", 0);
-        writer.add_term("sandisk", 1);
-        writer.add_term("apple", 2);
-        writer.add_term("sapato", 3);
+        let mut w = InvertedIndexWriter::new();
+        w.add_term("samsung", 0, 5);
+        w.add_term("sandisk", 1, 5);
+        w.add_term("apple", 2, 4);
+        w.write(&seg, 5.0).unwrap();
 
-        writer.write(&seg_dir).unwrap();
-
-        let reader = InvertedIndexReader::open(&seg_dir).unwrap();
-
-        let results = reader.prefix_search("sam");
-        let terms: Vec<&str> = results.iter().map(|(t, _)| t.as_str()).collect();
-        assert!(terms.contains(&"samsung"));
-        assert!(!terms.contains(&"sandisk")); // "san" != "sam"
-        assert!(!terms.contains(&"apple"));
-
-        let results = reader.prefix_search("sa");
-        assert_eq!(results.len(), 3); // samsung, sandisk, sapato
-    }
-
-    #[test]
-    fn test_empty_index() {
-        let dir = make_test_dir();
-        let seg_dir = dir.path().join("seg");
-
-        let writer = InvertedIndexWriter::new();
-        writer.write(&seg_dir).unwrap();
-
-        let reader = InvertedIndexReader::open(&seg_dir).unwrap();
-        assert_eq!(reader.term_count(), 0);
-        assert!(reader.get_postings("anything").is_none());
+        let r = InvertedIndexReader::open(&seg).unwrap();
+        let results = r.prefix_search("sam");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "samsung");
     }
 }

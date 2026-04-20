@@ -2,7 +2,7 @@ use crate::collector::TopNCollector;
 use crate::executor::{QueryExecutor, SegmentSearchResult};
 use crate::scorer::SegmentStatistics;
 use search_core::{
-    AggregationBucket, Document, IndexSchema, SearchRequest, SearchResponse, SearchHit,
+    AggregationBucket, Document, IndexSchema, RetrievalMode, SearchRequest, SearchResponse, SearchHit,
 };
 use search_index::SegmentReader;
 use std::collections::HashMap;
@@ -28,13 +28,17 @@ impl MultiSegmentSearcher {
         let mut all_scored = Vec::new();
         let mut total_hits: u64 = 0;
         let mut merged_aggs: HashMap<String, HashMap<String, u64>> = HashMap::new();
+        let mut any_or_fallback = false;
 
         for (ord, (reader, stats)) in segments.iter().enumerate() {
-            let SegmentSearchResult { scored_docs, total_hits: seg_hits, aggregations } =
+            let SegmentSearchResult { scored_docs, total_hits: seg_hits, aggregations, retrieval_mode } =
                 self.executor.execute(reader, stats, ord, request)?;
 
             total_hits += seg_hits;
             all_scored.extend(scored_docs);
+            if retrieval_mode == RetrievalMode::OrFallback {
+                any_or_fallback = true;
+            }
 
             for (field, counts) in aggregations {
                 let bucket = merged_aggs.entry(field).or_default();
@@ -57,7 +61,7 @@ impl MultiSegmentSearcher {
             .filter_map(|scored| {
                 let (reader, _) = segments.get(scored.segment_ord)?;
                 let doc: Document = reader.get_doc(scored.local_doc_id)?;
-                Some(SearchHit { id: doc.id, score: scored.score, document: doc })
+                Some(SearchHit { id: doc.id, score: scored.score, document: Some(doc) })
             })
             .collect();
 
@@ -79,6 +83,8 @@ impl MultiSegmentSearcher {
             aggregations,
             reranked: false,
             took_ms: start.elapsed().as_millis() as u64,
+            retrieval_mode: if any_or_fallback { RetrievalMode::OrFallback } else { RetrievalMode::And },
+            cache_hit: false,
         })
     }
 }

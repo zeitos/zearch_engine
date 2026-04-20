@@ -79,8 +79,35 @@ impl SegmentWriter {
             })
             .collect();
 
+        // First pass: compute per-doc combined token counts (for avgdl and block-max scores).
+        let doc_lengths: Vec<u16> = docs
+            .iter()
+            .map(|doc| {
+                let combined: usize = text_analyzers
+                    .iter()
+                    .map(|(field_name, analyzer, _)| {
+                        let text = match *field_name {
+                            "title" => &doc.title,
+                            "description" => &doc.description,
+                            _ => return 0,
+                        };
+                        analyzer.analyze(text).len()
+                    })
+                    .sum();
+                combined.min(u16::MAX as usize) as u16
+            })
+            .collect();
+
+        let avgdl = if doc_lengths.is_empty() {
+            1.0f32
+        } else {
+            doc_lengths.iter().map(|&l| l as f64).sum::<f64>() as f32
+                / doc_lengths.len() as f32
+        };
+
         for (local_doc_id, doc) in docs.iter().enumerate() {
             let local_id = local_doc_id as u32;
+            let doc_len = doc_lengths[local_doc_id];
 
             // Index text fields
             for (field_name, analyzer, _boost) in &text_analyzers {
@@ -91,7 +118,7 @@ impl SegmentWriter {
                 };
                 let tokens = analyzer.analyze(text);
                 for token in &tokens {
-                    inverted_writer.add_term(&token.text, local_id);
+                    inverted_writer.add_term(&token.text, local_id, doc_len);
                 }
             }
 
@@ -126,8 +153,8 @@ impl SegmentWriter {
             doc_writer.add(doc.clone());
         }
 
-        // Write inverted index
-        inverted_writer.write(dir)?;
+        // Write inverted index (pass avgdl so block-max scores can be computed)
+        inverted_writer.write(dir, avgdl)?;
 
         // Write column store
         let mut col_store = ColumnStore::default();

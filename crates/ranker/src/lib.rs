@@ -1,3 +1,4 @@
+pub mod breaker;
 pub mod factory;
 pub mod grpc;
 pub mod noop;
@@ -6,6 +7,7 @@ pub mod wasm;
 use search_core::{RankCandidate, RankedResult};
 use std::time::Duration;
 
+pub use breaker::BreakerRanker;
 pub use factory::RankerFactory;
 pub use grpc::GrpcRanker;
 pub use noop::NoopRanker;

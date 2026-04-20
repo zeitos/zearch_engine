@@ -10,9 +10,18 @@ pub enum WalEntry {
     Delete(u64),
 }
 
+/// WAL entry with a monotonically increasing sequence number.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalRecord {
+    pub seq: u64,
+    pub entry: WalEntry,
+}
+
 pub struct WriteAheadLog {
     path: std::path::PathBuf,
     file: File,
+    /// Next sequence number to assign.
+    next_seq: u64,
 }
 
 impl WriteAheadLog {
@@ -23,33 +32,45 @@ impl WriteAheadLog {
             .read(true)
             .open(path)
             .map_err(search_core::Error::Io)?;
-        Ok(Self { path: path.to_path_buf(), file })
+        let mut wal = Self { path: path.to_path_buf(), file, next_seq: 0 };
+        // Scan existing records to find the highest sequence number.
+        let records = wal.read_records()?;
+        if let Some(last) = records.last() {
+            wal.next_seq = last.seq + 1;
+        }
+        Ok(wal)
     }
 
-    /// Append an entry and fsync.
-    pub fn append(&mut self, entry: &WalEntry) -> search_core::Result<()> {
-        self.append_batch(std::slice::from_ref(entry))
+    /// Append an entry, assign a sequence number, fsync, and return the sequence number.
+    pub fn append(&mut self, entry: &WalEntry) -> search_core::Result<u64> {
+        let seqs = self.append_batch(std::slice::from_ref(entry))?;
+        Ok(seqs[0])
     }
 
-    /// Append multiple entries with a single fsync.
-    pub fn append_batch(&mut self, entries: &[WalEntry]) -> search_core::Result<()> {
+    /// Append multiple entries with a single fsync. Returns the assigned sequence numbers.
+    pub fn append_batch(&mut self, entries: &[WalEntry]) -> search_core::Result<Vec<u64>> {
+        let mut seqs = Vec::with_capacity(entries.len());
         for entry in entries {
-            let encoded = bincode::serialize(entry)
+            let seq = self.next_seq;
+            self.next_seq += 1;
+            let record = WalRecord { seq, entry: entry.clone() };
+            let encoded = bincode::serialize(&record)
                 .map_err(|e| search_core::Error::Wal(e.to_string()))?;
             let len = encoded.len() as u32;
             self.file.write_all(&len.to_le_bytes()).map_err(search_core::Error::Io)?;
             self.file.write_all(&encoded).map_err(search_core::Error::Io)?;
+            seqs.push(seq);
         }
         self.file.flush().map_err(search_core::Error::Io)?;
         self.file.sync_data().map_err(search_core::Error::Io)?;
-        Ok(())
+        Ok(seqs)
     }
 
-    /// Read all valid entries. Partial trailing entries are silently discarded.
-    pub fn read_all(&mut self) -> search_core::Result<Vec<WalEntry>> {
+    /// Read all valid records. Partial trailing records are silently discarded.
+    pub fn read_records(&mut self) -> search_core::Result<Vec<WalRecord>> {
         self.file.seek(SeekFrom::Start(0)).map_err(search_core::Error::Io)?;
         let mut reader = BufReader::new(&self.file);
-        let mut entries = Vec::new();
+        let mut records = Vec::new();
         loop {
             let mut len_buf = [0u8; 4];
             match reader.read_exact(&mut len_buf) {
@@ -61,14 +82,29 @@ impl WriteAheadLog {
             let mut data = vec![0u8; len];
             match reader.read_exact(&mut data) {
                 Ok(()) => {}
-                Err(_) => break, // partial entry — discard
+                Err(_) => break,
             }
-            match bincode::deserialize::<WalEntry>(&data) {
-                Ok(entry) => entries.push(entry),
-                Err(_) => break, // corrupted entry — stop here
+            match bincode::deserialize::<WalRecord>(&data) {
+                Ok(record) => records.push(record),
+                Err(_) => break,
             }
         }
-        Ok(entries)
+        Ok(records)
+    }
+
+    /// Read all entries (without sequence numbers) — used for crash recovery.
+    pub fn read_all(&mut self) -> search_core::Result<Vec<WalEntry>> {
+        Ok(self.read_records()?.into_iter().map(|r| r.entry).collect())
+    }
+
+    /// Read all records with seq >= `from_seq` — used for replica catch-up.
+    pub fn read_since(&mut self, from_seq: u64) -> search_core::Result<Vec<WalRecord>> {
+        Ok(self.read_records()?.into_iter().filter(|r| r.seq >= from_seq).collect())
+    }
+
+    /// The next sequence number that will be assigned (= highest written seq + 1).
+    pub fn next_seq(&self) -> u64 {
+        self.next_seq
     }
 
     /// Truncate the WAL (called after a successful flush).
@@ -79,7 +115,6 @@ impl WriteAheadLog {
             .open(&self.path)
             .map_err(search_core::Error::Io)?;
         file.sync_all().map_err(search_core::Error::Io)?;
-        // Re-open in append mode
         self.file = OpenOptions::new()
             .create(true)
             .append(true)

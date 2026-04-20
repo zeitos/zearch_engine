@@ -50,7 +50,10 @@ impl SegmentStatistics {
     }
 }
 
+pub const K1: f32 = 1.2;
+
 /// BM25 scorer with configurable k1 and b parameters.
+#[derive(Clone)]
 pub struct Bm25Scorer {
     pub k1: f32,
     pub b: f32,

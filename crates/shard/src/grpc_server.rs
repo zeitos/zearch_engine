@@ -2,12 +2,16 @@ use crate::shard::ShardEngine;
 use search_core::{Document, FilterValue, SearchRequest, SortOrder, SortSpec, Value};
 use search_proto::shard::shard_service_server::ShardService;
 use search_proto::shard::{
-    filter_value, AggregationBucket, AggregationResult, BulkIndexRequest, BulkIndexResponse,
-    DeleteRequest, DeleteResponse, DocumentProto, FlushRequest, FlushResponse, GetDocsRequest,
-    GetDocsResponse, HealthRequest, HealthResponse, IndexRequest, IndexResponse, ScoredDocument,
-    SearchRequest as ProtoSearchRequest, SearchResponse as ProtoSearchResponse,
-    SortOrder as ProtoSortOrder, StatsRequest, StatsResponse,
+    filter_value, replicate_request, AggregationBucket, AggregationResult, BulkIndexRequest,
+    BulkIndexResponse, CatchUpRequest, DeleteRequest, DeleteResponse, DocumentProto, FlushRequest,
+    FlushResponse, FullSyncRequest, GetDocsRequest, GetDocsResponse, HealthRequest, HealthResponse,
+    IndexRequest, IndexResponse, ReindexRequest, ReindexResponse, ReplicateRequest,
+    ReplicateResponse, ScoredDocument, SearchRequest as ProtoSearchRequest,
+    SearchResponse as ProtoSearchResponse, SortOrder as ProtoSortOrder, StatsRequest, StatsResponse,
+    SuggestRequest, SuggestResponse,
 };
+use tokio_stream::wrappers::ReceiverStream;
+use crate::wal::WalEntry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -86,6 +90,8 @@ fn proto_to_search_request(proto: ProtoSearchRequest) -> SearchRequest {
         limit: proto.limit as usize,
         typo_tolerance: proto.typo_tolerance,
         language: proto.language,
+        destination_zone: None,
+        include_docs: true,
     }
 }
 
@@ -120,10 +126,16 @@ impl ShardService for ShardGrpcServer {
             })
             .collect();
 
+        let retrieval_mode = match resp.retrieval_mode {
+            search_core::RetrievalMode::And => "and".to_string(),
+            search_core::RetrievalMode::OrFallback => "or_fallback".to_string(),
+        };
+
         Ok(Response::new(ProtoSearchResponse {
             hits,
             total_hits: resp.total_hits,
             aggregations,
+            retrieval_mode,
         }))
     }
 
@@ -212,5 +224,106 @@ impl ShardService for ShardGrpcServer {
         Ok(Response::new(FlushResponse {
             segments_created: after.saturating_sub(before),
         }))
+    }
+
+    async fn reindex(
+        &self,
+        _request: Request<ReindexRequest>,
+    ) -> Result<Response<ReindexResponse>, Status> {
+        let stats = self.shard.reindex_self().map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(ReindexResponse {
+            shard_id: stats.shard_id,
+            docs_reindexed: stats.docs_reindexed,
+            elapsed_ms: stats.elapsed_ms,
+        }))
+    }
+
+    async fn replicate(
+        &self,
+        request: Request<ReplicateRequest>,
+    ) -> Result<Response<ReplicateResponse>, Status> {
+        if !self.shard.is_replica() {
+            return Err(Status::failed_precondition("replicate called on a primary shard"));
+        }
+        let req = request.into_inner();
+        let entry = match req.operation {
+            Some(replicate_request::Operation::IndexDoc(doc)) => WalEntry::Index(proto_to_doc(doc)),
+            Some(replicate_request::Operation::DeleteDocId(id)) => WalEntry::Delete(id),
+            Some(replicate_request::Operation::Flush(_)) => {
+                self.shard.flush().map_err(|e| Status::internal(e.to_string()))?;
+                return Ok(Response::new(ReplicateResponse { ok: true }));
+            }
+            None => return Ok(Response::new(ReplicateResponse { ok: true })),
+        };
+        self.shard.apply_replicated(entry).map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(ReplicateResponse { ok: true }))
+    }
+
+    type FullSyncStream = ReceiverStream<Result<DocumentProto, Status>>;
+    type ReplicateCatchUpStream = ReceiverStream<Result<ReplicateRequest, Status>>;
+
+    async fn replicate_catch_up(
+        &self,
+        request: Request<CatchUpRequest>,
+    ) -> Result<Response<Self::ReplicateCatchUpStream>, Status> {
+        let from_seq = request.into_inner().from_wal_seq;
+        let records = self.shard
+            .wal_records_since(from_seq)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let (tx, rx) = tokio::sync::mpsc::channel(256);
+        tokio::spawn(async move {
+            for record in records {
+                let operation = match record.entry {
+                    WalEntry::Index(doc) => replicate_request::Operation::IndexDoc(DocumentProto {
+                        id: doc.id, title: doc.title, description: doc.description,
+                        price: doc.price, category: doc.category,
+                        attributes: doc.attributes.into_iter()
+                            .filter_map(|(k, v)| {
+                                if let search_core::Value::String(s) = v { Some((k, s)) } else { None }
+                            })
+                            .collect(),
+                    }),
+                    WalEntry::Delete(id) => replicate_request::Operation::DeleteDocId(id),
+                };
+                let msg = ReplicateRequest { operation: Some(operation), wal_seq: record.seq };
+                if tx.send(Ok(msg)).await.is_err() { break; }
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn full_sync(
+        &self,
+        _request: Request<FullSyncRequest>,
+    ) -> Result<Response<Self::FullSyncStream>, Status> {
+        let docs = self.shard.get_all_live_docs();
+        let (tx, rx) = tokio::sync::mpsc::channel(256);
+        tokio::spawn(async move {
+            for doc in docs {
+                let proto = DocumentProto {
+                    id: doc.id,
+                    title: doc.title,
+                    description: doc.description,
+                    price: doc.price,
+                    category: doc.category,
+                    attributes: doc.attributes.into_iter()
+                        .filter_map(|(k, v)| {
+                            if let search_core::Value::String(s) = v { Some((k, s)) } else { None }
+                        })
+                        .collect(),
+                };
+                if tx.send(Ok(proto)).await.is_err() { break; }
+            }
+        });
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
+
+    async fn suggest(
+        &self,
+        _request: Request<SuggestRequest>,
+    ) -> Result<Response<SuggestResponse>, Status> {
+        Err(Status::unimplemented("search shard does not implement Suggest"))
     }
 }

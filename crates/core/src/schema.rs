@@ -20,7 +20,7 @@ impl IndexSchema {
                     aggregatable: false,
                     boost: 2.0,
                     analyzer: AnalyzerType::Standard {
-                        language: Language::English,
+                        language: Language::Spanish,
                     },
                 },
                 FieldConfig {
@@ -32,7 +32,7 @@ impl IndexSchema {
                     aggregatable: false,
                     boost: 1.0,
                     analyzer: AnalyzerType::Standard {
-                        language: Language::English,
+                        language: Language::Spanish,
                     },
                 },
                 FieldConfig {

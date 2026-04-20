@@ -1,22 +1,23 @@
-use crate::{GrpcRanker, NoopRanker, Ranker, WasmRanker};
+use crate::{BreakerRanker, GrpcRanker, NoopRanker, Ranker, WasmRanker};
 use search_core::{RankerConfig, RankerType};
 use std::sync::Arc;
 
 pub struct RankerFactory;
 
 impl RankerFactory {
-    /// Build the appropriate ranker from config.
-    /// Returns a boxed `Ranker` wrapped in `Arc` for shared ownership.
+    /// Build the ranker from config. Wraps remote rankers in a circuit breaker
+    /// when `circuit_breaker.enabled = true`, so a CPU-saturated or down ranker
+    /// short-circuits to BM25 fallback instead of stalling search.
     pub fn build(config: &RankerConfig) -> search_core::Result<Arc<dyn Ranker>> {
-        match config.r#type {
-            RankerType::None => Ok(Arc::new(NoopRanker)),
+        let inner: Arc<dyn Ranker> = match config.r#type {
+            RankerType::None => Arc::new(NoopRanker),
             RankerType::Grpc => {
                 let endpoint = config.grpc_endpoint.clone().ok_or_else(|| {
                     search_core::Error::Config(
                         "grpc ranker requires grpc_endpoint to be set".into(),
                     )
                 })?;
-                Ok(Arc::new(GrpcRanker::new(endpoint)))
+                Arc::new(GrpcRanker::new(endpoint))
             }
             RankerType::Wasm => {
                 let path = config.wasm_module.as_ref().ok_or_else(|| {
@@ -24,9 +25,14 @@ impl RankerFactory {
                         "wasm ranker requires wasm_module path to be set".into(),
                     )
                 })?;
-                let ranker = WasmRanker::from_file(path)?;
-                Ok(Arc::new(ranker))
+                Arc::new(WasmRanker::from_file(path)?)
             }
+        };
+
+        if config.circuit_breaker.enabled && matches!(config.r#type, RankerType::Grpc) {
+            Ok(Arc::new(BreakerRanker::new(inner, &config.circuit_breaker)))
+        } else {
+            Ok(inner)
         }
     }
 }

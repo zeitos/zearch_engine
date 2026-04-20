@@ -4,25 +4,43 @@ metadata:
   name: search-engine-config
   namespace: search
 data:
-  # Router config — shard endpoints use StatefulSet DNS names.
-  # Replace NUM_SHARDS with actual replica count if changed.
+  # Router config — uses shard groups (primary + replica per group).
+  # shard_id N → primary shard-N, replica shard-replica-N.
   router-config.yaml: |
     mode: router
+    telemetry:
+      enabled: false               # Set to true to export traces via OTLP
+      otlp_endpoint: "http://otel-collector.observability.svc.cluster.local:4317"
+      service_name: "search-router"
+      sample_rate: 1.0             # 1.0 = 100% sampling; reduce in high-traffic envs
     router:
       http_port: 8080
       query_timeout_ms: 5000
       shard_discovery: static
-      shard_endpoints:
-        - "http://shard-0.shard-headless.search.svc.cluster.local:9001"
-        - "http://shard-1.shard-headless.search.svc.cluster.local:9001"
-        - "http://shard-2.shard-headless.search.svc.cluster.local:9001"
-        - "http://shard-3.shard-headless.search.svc.cluster.local:9001"
+      suggest_shards:
+        - "http://suggest-0.suggest-headless.search.svc.cluster.local:9002"
+        - "http://suggest-1.suggest-headless.search.svc.cluster.local:9002"
+      suggest_write_timeout_ms: 200
+      suggest_query_timeout_ms: 100
+      shards:
+        - primary: "http://shard-0.shard-headless.search.svc.cluster.local:9001"
+          replicas:
+            - "http://shard-replica-0.shard-replica-headless.search.svc.cluster.local:9001"
+        - primary: "http://shard-1.shard-headless.search.svc.cluster.local:9001"
+          replicas:
+            - "http://shard-replica-1.shard-replica-headless.search.svc.cluster.local:9001"
+        - primary: "http://shard-2.shard-headless.search.svc.cluster.local:9001"
+          replicas:
+            - "http://shard-replica-2.shard-replica-headless.search.svc.cluster.local:9001"
+        - primary: "http://shard-3.shard-headless.search.svc.cluster.local:9001"
+          replicas:
+            - "http://shard-replica-3.shard-replica-headless.search.svc.cluster.local:9001"
     ranker:
       type: none
       timeout_ms: 30
       candidates: 200
 
-  # Shard config — shard_id is auto-detected from HOSTNAME at runtime.
+  # Primary shard config — shard_id and replica_endpoint auto-resolved from HOSTNAME ordinal.
   shard-config.yaml: |
     mode: shard
     shard:
@@ -31,3 +49,29 @@ data:
       num_shards: 4
       write_buffer_size: 67108864  # 64 MB
       merge_threads: 2
+      role: primary
+      replica_endpoint_template: "http://shard-replica-{ordinal}.shard-replica-headless.search.svc.cluster.local:9001"
+
+  # Replica shard config — one entry for all replicas; primary_endpoint resolved from HOSTNAME ordinal.
+  shard-replica-config.yaml: |
+    mode: shard
+    shard:
+      grpc_port: 9001
+      data_dir: /data
+      num_shards: 4
+      write_buffer_size: 67108864  # 64 MB
+      merge_threads: 2
+      role: replica
+      primary_endpoint_template: "http://shard-{ordinal}.shard-headless.search.svc.cluster.local:9001"
+
+  # Suggest cluster config — separate SLA, lossy, no WAL.
+  suggest-config.yaml: |
+    mode: suggest
+    suggest_shard:
+      grpc_port: 9002
+      num_suggest_shards: 2
+      min_doc_frequency: 2
+      max_terms_per_shard: 50000
+      fields:
+        - title
+

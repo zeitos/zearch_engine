@@ -45,6 +45,13 @@ pub struct SearchRequest {
     pub typo_tolerance: bool,
     #[serde(default)]
     pub language: Option<String>,
+    /// Zone used for post-retrieval availability filtering (e.g. "buenos_aires").
+    /// When absent or empty, no availability filtering is applied.
+    #[serde(default)]
+    pub destination_zone: Option<String>,
+    /// When true, full document fields are included in each hit. Default: false.
+    #[serde(default)]
+    pub include_docs: bool,
 }
 
 fn default_limit() -> usize {
@@ -66,6 +73,8 @@ impl Default for SearchRequest {
             limit: 20,
             typo_tolerance: true,
             language: None,
+            destination_zone: None,
+            include_docs: false,
         }
     }
 }
@@ -100,8 +109,8 @@ pub enum SortOrder {
 pub struct SearchHit {
     pub id: u64,
     pub score: f32,
-    #[serde(flatten)]
-    pub document: Document,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub document: Option<Document>,
 }
 
 /// Aggregation bucket: a value and its document count.
@@ -109,6 +118,14 @@ pub struct SearchHit {
 pub struct AggregationBucket {
     pub value: String,
     pub count: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RetrievalMode {
+    #[default]
+    And,
+    OrFallback,
 }
 
 /// Search response to the client.
@@ -120,6 +137,10 @@ pub struct SearchResponse {
     pub aggregations: HashMap<String, Vec<AggregationBucket>>,
     pub reranked: bool,
     pub took_ms: u64,
+    #[serde(default)]
+    pub retrieval_mode: RetrievalMode,
+    #[serde(default)]
+    pub cache_hit: bool,
 }
 
 // ---------------------------------------------------------------------------

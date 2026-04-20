@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: shard-replica
+  namespace: search
+  labels:
+    app: shard-replica
+spec:
+  serviceName: shard-replica-headless
+  replicas: 4
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: shard-replica
+  template:
+    metadata:
+      labels:
+        app: shard-replica
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: shard
+          image: search-engine:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--mode=shard"
+            - "--config=/etc/search/shard-replica-config.yaml"
+          # HOSTNAME is automatically set to pod name (shard-replica-0, shard-replica-1, …)
+          # The binary parses the ordinal from HOSTNAME for shard_id, then resolves
+          # primary_endpoint_template → primary_endpoint.
+          ports:
+            - name: grpc
+              containerPort: 9001
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 9001
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: 9001
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/search
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: search-engine-config
+            items:
+              - key: shard-replica-config.yaml
+                path: shard-replica-config.yaml
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 50Gi

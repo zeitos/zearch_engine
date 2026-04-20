@@ -121,6 +121,11 @@ impl WriteBuffer {
         self.docs.iter()
     }
 
+    /// All live (non-deleted) documents in the buffer.
+    pub fn all_docs(&self) -> Vec<Document> {
+        self.docs.iter().filter(|d| !self.deleted_ids.contains(&d.id)).cloned().collect()
+    }
+
     /// Drain the buffer: return all docs and deleted IDs, reset to empty.
     pub fn drain(&mut self) -> (Vec<Document>, HashSet<u64>) {
         self.segment_reader = None;

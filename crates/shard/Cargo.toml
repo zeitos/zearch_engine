@@ -10,6 +10,7 @@ search-index = { workspace = true }
 search-query = { workspace = true }
 search-analysis = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
